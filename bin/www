@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('wholesomechat:server');
+var http = require('http');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+
+
+
+// chat web-socket stuff //
+
+
+// adding message.js from utils
+const formatMessage = require('../public/utils/message.js');
+
+// adding users,js from utils
+const {userJoin, getCurrentUser, userleave, getRoomUsers} = require('../public/utils/users.js');
+
+
+// adding socket.io
+const socketio = require('socket.io');
+const { join } = require('path');
+// run when client connects
+const io = socketio(server);
+io.on('connection', socket => {
+    //console.log(`new ws connection on...`);
+
+    // catching client's displayname and room
+    socket.on('joinRoom',({displayname, room})=>{
+
+        const user = userJoin(socket.id, displayname, room);
+
+        socket.join(user.room);
+
+
+        // only for the connected user
+        socket.emit('message', formatMessage('Bot','Welcome to the Chat !!!'));
+
+        // broadcast to all except the connected user when someone connects
+        socket.broadcast
+        .to(user.room)
+        .emit('message', formatMessage('Bot',`${user.displayname} has joined the Chat !`));
+
+
+    });
+
+
+    // broadcast to all user
+    //io.emit();
+
+
+    // listen the chatMessage and emit to all users in the room
+    socket.on('chatMessage', (msg) => {
+        const user = getCurrentUser(socket.id);
+        io.to(user.room).emit('message', formatMessage(user.displayname,msg));
+    });
+
+
+    // when someone disconnects
+    socket.on('disconnect',() => {
+        const user = userleave(socket.id);
+        if(user){
+            io.to(user.room).emit('message',formatMessage('Bot',`${user.displayname} left the Chat. :(`));
+        }
+    });
+
+});
